@@ -3,5 +3,7 @@ name = "iter-solver"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+description = "A rust crate provide flexible and general iterative algorithm framework." 
+repository = "https://github.com/Y-S-Xing/iter-solver"
 
 [dependencies]

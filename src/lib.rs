@@ -387,7 +387,13 @@ mod test {
 
             let mut solver = Solver::new(iter_fn, term_cond);
 
+            let mut solver1 = solver.clone().change_term_cond(|state, equation| {
+                equation.calc(state.0) < 1e-9
+            });
+
             let prob1 = (Equation::Exp { a: 2., k: 3. }, 2.);
+
+            let cloned_and_change_cond_sol = solver1.solve(prob1.1, &prob1.0.clone());
 
             let prob2 = (Equation::Square { a: 2., b: -5., c: 3. }, 6.);
 
@@ -398,6 +404,8 @@ mod test {
             println!("with direct calc: {}", (1.5_f64).ln());
             println!("the numerical solution of $2x^2 - 5x + 3 = 0$ is: {}", prob2_sol);
             println!("with direct calc: {} or {}", ((5. + 1.)/4.) , (3./4.));
+
+            println!("cloned sol: {}", cloned_and_change_cond_sol);
 
             assert!(prob1.0.calc(prob1_sol) < 1e-6);
             assert!(prob2.0.calc(prob2_sol) < 1e-6)

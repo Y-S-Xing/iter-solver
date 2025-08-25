@@ -187,7 +187,7 @@ where
     /// let mut iteration = 1usize;
     /// 
     /// for state_float in solver.into_iter(2.0, &problem) {
-    ///     println("the solution after {} iteration(s): {}", iteration, state_float);
+    ///     println!("the solution after {} iteration(s): {}", iteration, state_float);
     ///     iteration += 1;
     /// } 
     /// ```
@@ -195,7 +195,7 @@ where
         initial_point: State::Value, 
         problem: &'prob Problem
     ) -> SolverIterater<'prob, State, Problem, IterFn, TermFn> {
-        // 初始化Slover
+        // init Slover
         let initial_state = State::init_from_value(initial_point);
 
         SolverIterater { 

@@ -174,7 +174,11 @@ where
         
         let final_state = unsafe{ self.state.assume_init_ref() };
 
-        final_state.to_sol()
+        let sol = final_state.to_sol();
+
+        unsafe { self.state.assume_init_drop(); }
+
+        sol
     }
 
     /// Consumes the `Solver` and generates an iterator that outputs the current State at each step based on the given initial value and problem.

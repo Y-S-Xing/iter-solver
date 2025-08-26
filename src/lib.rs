@@ -1,8 +1,7 @@
 #![doc = include_str!("../README.md")]
 
-
+mod utils;
 use std::{marker::PhantomData, mem::{self, MaybeUninit}};
-
 
 /// Intermediate state of an iterative algorithm.
 ///
@@ -229,6 +228,7 @@ where
             return None;
         }
         if (self.term_cond)(&self.state, &self.problem) {
+            self.need_term = true;
             let _state = (self.iter_fn)(&self.state, &self.problem);
             return Some(mem::replace(&mut self.state, _state));
         }
@@ -426,6 +426,40 @@ mod test {
                     }
                 }
             }
+        }
+    }
+
+    mod test_leak {
+        use crate::{utils, Solver};
+        
+
+        #[test]
+        fn solve() {
+            let iter_fn = |state: &utils::debug::VisibleDrop, _: &()| {
+                utils::debug::VisibleDrop::new(state.get().wrapping_add(1))
+            };
+
+            let term_cond = |state: &utils::debug::VisibleDrop, _: &()| {
+                state.get() == 2
+            };
+
+            let mut solver = Solver::new(iter_fn, term_cond);
+
+            println!("solve");
+
+            solver.solve(0, &());
+
+
+
+            println!("iter");
+            for _ in solver.clone().into_iter(0, &()) {
+                println!("do iter")
+            }
+
+        //    println!("solve with timeout");
+        //    let mut loop_solver = solver.change_term_cond(|_,_| false);
+
+
         }
     }
 }

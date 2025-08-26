@@ -207,6 +207,7 @@ where
             state: initial_state,
             iter_fn: self.iter_fn,
             term_cond: self.term_cond, 
+            need_term: false
         }
     }
 
@@ -257,6 +258,7 @@ where
     iter_fn: IterFn,
     term_cond: TermFn,
     problem: &'prob Problem,
+    need_term: bool
 }
 
 impl<'prob, State, Problem, IterFn, TermFn> Iterator for SolverIterater<'prob, State, Problem, IterFn, TermFn> 
@@ -268,8 +270,12 @@ where
     type Item = State;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if (self.term_cond)(&self.state, &self.problem) {
+        if self.need_term {
             return None;
+        }
+        if (self.term_cond)(&self.state, &self.problem) {
+            let _state = (self.iter_fn)(&self.state, &self.problem);
+            return Some(mem::replace(&mut self.state, _state));
         }
 
         let next_state = (self.iter_fn)(&self.state, &self.problem);

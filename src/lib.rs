@@ -333,6 +333,163 @@ where
     }
 }
 
+pub struct InPlaceSolver<State, Problem, IterFn, TermFn>
+where
+    State: IterState,
+    IterFn: Fn(&mut State, &Problem),
+    TermFn: Fn(&State, &Problem) -> bool,
+{
+    /// Intermediate state of the solver (uninitialized at the start)
+    state: MaybeUninit<State>,
+    /// Placeholder for the problem type (no runtime storage)
+    problem: PhantomData<Problem>,
+    /// Function defining the iteration logic
+    iter_fn: IterFn,
+    /// Function defining the termination condition
+    term_cond: TermFn,
+}
+
+impl<State, Problem, IterFn, TermFn> InPlaceSolver<State, Problem, IterFn, TermFn>
+where 
+    State: IterState,
+    IterFn: Fn(&mut State, &Problem),
+    TermFn: Fn(&State, &Problem) -> bool,
+{
+    pub fn new(iterfn: IterFn, termcond: TermFn) -> Self {
+        Self { 
+            state: MaybeUninit::uninit(), 
+            problem: PhantomData::<Problem>,
+            iter_fn: iterfn, 
+            term_cond: termcond 
+        }
+    }
+
+    pub fn solve(&mut self, initial_point: State::Value, problem: &Problem) -> State::Solution {
+        // init state
+        let initial_state = State::init_from_value(initial_point);
+        self.state.write(initial_state);
+        
+        // do iter
+        loop {
+            let state = unsafe { self.state.assume_init_mut() };
+
+            (self.iter_fn)(state, problem);
+
+            // check termination cond
+            if (self.term_cond)(state, problem) {
+                break;
+            }
+        }
+        
+        let final_state = unsafe{ self.state.assume_init_read() };
+        
+        final_state.to_sol()
+    }
+
+
+    pub fn solve_with_max_iteration(
+        &mut self,
+        initial_point: State::Value,
+        problem: &Problem,
+        max_iteration: u64
+    ) -> Result<State::Solution, error::ReachMaxIteration<State>> {
+        let mut reach_max = true;
+
+        // init state
+        let initial_state = State::init_from_value(initial_point);
+        self.state.write(initial_state);        
+        
+        for _iteration in 0..max_iteration {
+            let state = unsafe { self.state.assume_init_mut() };
+
+            (self.iter_fn)(state, problem);
+
+            // check termination cond
+            if (self.term_cond)(state, problem) {
+                reach_max = false;
+                break;
+            }
+        }
+
+        let ret_res = if !reach_max {
+            let final_state = unsafe{ self.state.assume_init_ref() };
+            let sol = final_state.to_sol();
+            unsafe { self.state.assume_init_drop(); }
+            Ok(sol)
+        } else {
+            let final_state = unsafe { self.state.assume_init_read() };
+            Err(ReachMaxIteration{
+                max_iteration: max_iteration, 
+                final_state: final_state
+            })
+        };
+
+        ret_res
+    }
+
+    pub fn solve_with_timeout(
+        &mut self,
+        initial_point: State::Value,
+        problem: &Problem,
+        timeout: Duration        
+    ) -> Result<State::Solution, TimeOut<State>> {
+        let start_time = Instant::now();
+        let mut is_timeout = true;
+
+        // init state
+        let initial_state = State::init_from_value(initial_point);
+        self.state.write(initial_state);
+        
+        // do iter
+        loop {
+            let state = unsafe { self.state.assume_init_mut() };
+
+            (self.iter_fn)(state, problem);
+
+            // check termination cond
+            if (self.term_cond)(state, problem) {
+                is_timeout = false;
+                break;
+            }
+
+            if start_time.elapsed() > timeout {
+                break;
+            }
+        }
+
+        if !is_timeout {
+            let final_state = unsafe{ self.state.assume_init_ref() };
+
+            let sol = final_state.to_sol();
+
+            unsafe { self.state.assume_init_drop(); }
+
+            Ok(sol)                
+        } else {
+            let final_state = unsafe { self.state.assume_init_read() };
+            Err(TimeOut { timeout: timeout, final_state: final_state })            
+        }
+
+    }
+
+    // fn into_iter
+
+
+    pub fn change_term_cond<NewTermCond>(self, new_cond: NewTermCond) -> InPlaceSolver<State, Problem, IterFn, NewTermCond> 
+    where 
+        NewTermCond: Fn(&State, &Problem) -> bool
+    {
+        InPlaceSolver { 
+            state: self.state, 
+            problem: self.problem, 
+            iter_fn: self.iter_fn,
+            term_cond: new_cond 
+        }
+    }
+}
+
+
+
 #[cfg(test)]
 mod test {
     mod newton {

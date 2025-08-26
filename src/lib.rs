@@ -1,7 +1,11 @@
 #![doc = include_str!("../README.md")]
 
+use std::{marker::PhantomData, mem::{self, MaybeUninit}, time::{Duration, Instant}};
+
+use crate::error::{ReachMaxIteration, TimeOut};
+
+pub mod error;
 mod utils;
-use std::{marker::PhantomData, mem::{self, MaybeUninit}};
 
 /// Intermediate state of an iterative algorithm.
 ///
@@ -13,17 +17,17 @@ use std::{marker::PhantomData, mem::{self, MaybeUninit}};
 ///
 /// If you expect the simplest behavior, this crate has already implemented `IterState` for basic data types `i*`, `u*`, and `f*`, where their associated types Value and Solution are themselves.
 pub trait IterState: Sized {
-/// Type representing the value during iteration (e.g., intermediate computation results).
-type Value;
+    /// Type representing the value during iteration (e.g., intermediate computation results).
+    type Value;
 
-/// Type representing the final solution.  
-type Solution;  
+    /// Type representing the final solution.  
+    type Solution;  
 
-/// Initializes the state from an initial value.  
-fn init_from_value(initial_point: Self::Value) -> Self;  
+    /// Initializes the state from an initial value.  
+    fn init_from_value(initial_point: Self::Value) -> Self;  
 
-/// Converts the current state into the solution.  
-fn to_sol(&self) -> Self::Solution;  
+    /// Converts the current state into the solution.  
+    fn to_sol(&self) -> Self::Solution;  
 }
 
 macro_rules! iterstate_impl {
@@ -134,6 +138,95 @@ where
 
         sol
     }
+
+
+
+    pub fn solve_with_max_iteration(
+        &mut self,
+        initial_point: State::Value,
+        problem: &Problem,
+        max_iteration: u64
+    ) -> Result<State::Solution, error::ReachMaxIteration<State>> {
+        let mut reach_max = true;
+
+        // init state
+        let initial_state = State::init_from_value(initial_point);
+        self.state.write(initial_state);        
+        
+        for _iteration in 0..max_iteration {
+            let state = unsafe { self.state.assume_init_mut() };
+
+            *state = (self.iter_fn)(state, problem);
+
+            // check termination cond
+            if (self.term_cond)(state, problem) {
+                reach_max = false;
+                break;
+            }
+        }
+
+        let ret_res = if !reach_max {
+            let final_state = unsafe{ self.state.assume_init_ref() };
+            let sol = final_state.to_sol();
+            unsafe { self.state.assume_init_drop(); }
+            Ok(sol)
+        } else {
+            let final_state = unsafe { self.state.assume_init_read() };
+            Err(ReachMaxIteration{
+                max_iteration: max_iteration, 
+                final_state: final_state
+            })
+        };
+
+        ret_res
+    }
+
+    pub fn solve_with_timeout(
+        &mut self,
+        initial_point: State::Value,
+        problem: &Problem,
+        timeout: Duration        
+    ) -> Result<State::Solution, TimeOut<State>> {
+        let start_time = Instant::now();
+        let mut is_timeout = true;
+
+        // init state
+        let initial_state = State::init_from_value(initial_point);
+        self.state.write(initial_state);
+        
+        // do iter
+        loop {
+            let state = unsafe { self.state.assume_init_mut() };
+
+            *state = (self.iter_fn)(state, problem);
+
+            // check termination cond
+            if (self.term_cond)(state, problem) {
+                is_timeout = false;
+                break;
+            }
+
+            if start_time.elapsed() > timeout {
+                break;
+            }
+        }
+
+        if !is_timeout {
+            let final_state = unsafe{ self.state.assume_init_ref() };
+
+            let sol = final_state.to_sol();
+
+            unsafe { self.state.assume_init_drop(); }
+
+            Ok(sol)                
+        } else {
+            let final_state = unsafe { self.state.assume_init_read() };
+            Err(TimeOut { timeout: timeout, final_state: final_state })            
+        }
+
+    }
+
+
 
     /// Consumes the `Solver` and generates an iterator that outputs the current State at each step based on the given initial value and problem.
     /// 
@@ -430,6 +523,8 @@ mod test {
     }
 
     mod test_leak {
+        use std::time::Duration;
+
         use crate::{utils, Solver};
         
 
@@ -450,16 +545,17 @@ mod test {
             solver.solve(0, &());
 
 
-
             println!("iter");
             for _ in solver.clone().into_iter(0, &()) {
                 println!("do iter")
             }
 
-        //    println!("solve with timeout");
-        //    let mut loop_solver = solver.change_term_cond(|_,_| false);
+            println!("solve with timeout");
+            let mut loop_solver = solver.change_term_cond(|_,_| false);
 
+            let timeout = Duration::from_nanos(1000);
 
+            let _ = loop_solver.solve_with_timeout(0, &(), timeout);
         }
     }
 }

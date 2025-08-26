@@ -35,7 +35,7 @@ fn main() {
 Add the driver to your `Cargo.toml` dependencies:
 ```ignor
 [dependencies]
-iter-solver = "0.1.0"
+iter-solver = "0.2.0"
 ```
 or add it directly from the terminal:
 ```ignor

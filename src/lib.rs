@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use std::{marker::PhantomData, mem::{self, MaybeUninit}, time::{Duration, Instant}};
+use std::{marker::PhantomData, mem, time::{Duration, Instant}};
 
 use crate::error::{ReachMaxIteration, TimeOut};
 
@@ -67,7 +67,7 @@ IterFn: Fn(&State, &Problem) -> State,
 TermFn: Fn(&State, &Problem) -> bool,
 {
     /// Intermediate state of the solver (uninitialized at the start)
-    state: MaybeUninit<State>,
+    state: PhantomData<State>,
     /// Placeholder for the problem type (no runtime storage)
     problem: PhantomData<Problem>,
     /// Function defining the iteration logic
@@ -92,7 +92,7 @@ where
         termcond: TermFn
     ) -> Self {
         Self { 
-            state: MaybeUninit::uninit(), 
+            state: PhantomData::<State>, 
             problem: PhantomData::<Problem>, 
             iter_fn: iterfn, 
             term_cond: termcond 
@@ -101,48 +101,53 @@ where
 
     /// Solves the problem by executing iterative logic with the given initial value and specific problem.
     ///
-    /// Note: If the algorithm defined by the solver contains logical errors, the solve function may enter an infinite loop.
-    /// 
-    /// Although this method receives `&mut self`, the same Solver can correctly call the solve method multiple times, with each call of the solve method not affecting the others.
-    /// # Example
-    /// ```no_run
-    /// let mut solver = Solver::new(iter_fn, term_cond);
-    /// 
-    /// solver.solve(val1, prob1);
-    /// 
-    /// // A second solve can be performed here without causing logical errors
-    /// solver.solve(val2, prob2);
-    /// ```
-    pub fn solve(&mut self, initial_point: State::Value, problem: &Problem) -> State::Solution {
+    /// # Note
+    /// If the algorithm defined by the solver contains logical errors, 
+    /// the solve function may enter an infinite loop. 
+    /// To avoid this, try [`Solver::solve_with_max_iteration`] or [`Solver::solve_with_timeout`].
+    pub fn solve(&self, initial_point: State::Value, problem: &Problem) -> State::Solution {
         // init state
         let initial_state = State::init_from_value(initial_point);
-        self.state.write(initial_state);
+        let mut state = initial_state;
         
         // do iter
         loop {
-            let state = unsafe { self.state.assume_init_mut() };
+            //let state = unsafe { self.state.assume_init_mut() };
 
-            *state = (self.iter_fn)(state, problem);
+            state = (self.iter_fn)(&state, problem);
 
             // check termination cond
-            if (self.term_cond)(state, problem) {
+            if (self.term_cond)(&state, problem) {
                 break;
             }
         }
         
-        let final_state = unsafe{ self.state.assume_init_ref() };
+        let final_state = state;
 
         let sol = final_state.to_sol();
 
-        unsafe { self.state.assume_init_drop(); }
+        //unsafe { self.state.assume_init_drop(); }
 
         sol
     }
 
 
-
+    /// A solution method with a maximum iteration limit.
+    /// If the termination condition is met before reaching the maximum number of iterations, it returns an [`Ok`] value with the type [`IterState::Solution`].
+    /// Otherwise, it returns an [`Err`] with [`error::ReachMaxIteration`].
+    /// 
+    /// # Example
+    /// ```
+    /// use iter_solver::Solver;
+    /// 
+    /// // define a never stop solver
+    /// let loop_solver = Solver::new(|_state: &f64, _: &()| {*_state}, |_: &f64, _: &()| {false});
+    /// let try_solve = loop_solver.solve_with_max_iteration(0.0, &(), 10);
+    /// 
+    /// assert!(try_solve.is_err());
+    /// ```
     pub fn solve_with_max_iteration(
-        &mut self,
+        &self,
         initial_point: State::Value,
         problem: &Problem,
         max_iteration: u64
@@ -151,27 +156,27 @@ where
 
         // init state
         let initial_state = State::init_from_value(initial_point);
-        self.state.write(initial_state);        
+        let mut state = initial_state;        
         
         for _iteration in 0..max_iteration {
-            let state = unsafe { self.state.assume_init_mut() };
+            //state = unsafe { self.state.assume_init_mut() };
 
-            *state = (self.iter_fn)(state, problem);
+            state = (self.iter_fn)(&state, problem);
 
             // check termination cond
-            if (self.term_cond)(state, problem) {
+            if (self.term_cond)(&state, problem) {
                 reach_max = false;
                 break;
             }
         }
 
         let ret_res = if !reach_max {
-            let final_state = unsafe{ self.state.assume_init_ref() };
+            let final_state = state;
             let sol = final_state.to_sol();
-            unsafe { self.state.assume_init_drop(); }
+            //unsafe { self.state.assume_init_drop(); }
             Ok(sol)
         } else {
-            let final_state = unsafe { self.state.assume_init_read() };
+            let final_state = state;
             Err(ReachMaxIteration{
                 max_iteration: max_iteration, 
                 final_state: final_state
@@ -181,27 +186,42 @@ where
         ret_res
     }
 
+    /// A solution method with a time limit.
+    /// If the termination condition is met before reaching the timeout duration elapses, it returns an [`Ok`] value with the type [`IterState::Solution`].
+    /// Otherwise, it returns an [`Err`] with [`error::TimeOut`].
+    /// 
+    /// # Example
+    /// ```
+    /// use iter_solver::Solver;
+    /// use std::time::Duration;
+    /// 
+    /// // define a never stop solver
+    /// let loop_solver = Solver::new(|_state: &f64, _: &()| {*_state}, |_: &f64, _: &()| {false});
+    /// let try_solve = loop_solver.solve_with_timeout(0.0, &(), Duration::from_secs(1));
+    /// 
+    /// assert!(try_solve.is_err());
+    /// ```
     pub fn solve_with_timeout(
-        &mut self,
+        &self,
         initial_point: State::Value,
         problem: &Problem,
         timeout: Duration        
     ) -> Result<State::Solution, TimeOut<State>> {
         let start_time = Instant::now();
         let mut is_timeout = true;
-
+        
         // init state
         let initial_state = State::init_from_value(initial_point);
-        self.state.write(initial_state);
+        let mut state = initial_state;
         
         // do iter
         loop {
-            let state = unsafe { self.state.assume_init_mut() };
+            //state = unsafe { self.state.assume_init_mut() };
 
-            *state = (self.iter_fn)(state, problem);
+            state = (self.iter_fn)(&state, problem);
 
             // check termination cond
-            if (self.term_cond)(state, problem) {
+            if (self.term_cond)(&state, problem) {
                 is_timeout = false;
                 break;
             }
@@ -212,15 +232,15 @@ where
         }
 
         if !is_timeout {
-            let final_state = unsafe{ self.state.assume_init_ref() };
+            let final_state = state;
 
             let sol = final_state.to_sol();
 
-            unsafe { self.state.assume_init_drop(); }
+            //unsafe { self.state.assume_init_drop(); }
 
             Ok(sol)                
         } else {
-            let final_state = unsafe { self.state.assume_init_read() };
+            let final_state = state; //unsafe { self.state.assume_init_read() };
             Err(TimeOut { timeout: timeout, final_state: final_state })            
         }
 
@@ -274,12 +294,12 @@ where
 
 impl<State, Problem, IterFn, TermFn> Clone for Solver<State, Problem, IterFn, TermFn>
 where 
-    State: IterState,
-    IterFn: Fn(&State, &Problem) -> State + Clone,
-    TermFn: Fn(&State, &Problem) -> bool + Clone
+   State: IterState,
+   IterFn: Fn(&State, &Problem) -> State + Clone,
+   TermFn: Fn(&State, &Problem) -> bool + Clone
 {
     fn clone(&self) -> Self {
-        Self { state: MaybeUninit::uninit(), problem: self.problem.clone(), iter_fn: self.iter_fn.clone(), term_cond: self.term_cond.clone() }
+        Self { state: PhantomData::<State>, problem: PhantomData::<Problem>, iter_fn: self.iter_fn.clone(), term_cond: self.term_cond.clone() }
     }
 }
 
@@ -333,160 +353,7 @@ where
     }
 }
 
-pub struct InPlaceSolver<State, Problem, IterFn, TermFn>
-where
-    State: IterState,
-    IterFn: Fn(&mut State, &Problem),
-    TermFn: Fn(&State, &Problem) -> bool,
-{
-    /// Intermediate state of the solver (uninitialized at the start)
-    state: MaybeUninit<State>,
-    /// Placeholder for the problem type (no runtime storage)
-    problem: PhantomData<Problem>,
-    /// Function defining the iteration logic
-    iter_fn: IterFn,
-    /// Function defining the termination condition
-    term_cond: TermFn,
-}
 
-impl<State, Problem, IterFn, TermFn> InPlaceSolver<State, Problem, IterFn, TermFn>
-where 
-    State: IterState,
-    IterFn: Fn(&mut State, &Problem),
-    TermFn: Fn(&State, &Problem) -> bool,
-{
-    pub fn new(iterfn: IterFn, termcond: TermFn) -> Self {
-        Self { 
-            state: MaybeUninit::uninit(), 
-            problem: PhantomData::<Problem>,
-            iter_fn: iterfn, 
-            term_cond: termcond 
-        }
-    }
-
-    pub fn solve(&mut self, initial_point: State::Value, problem: &Problem) -> State::Solution {
-        // init state
-        let initial_state = State::init_from_value(initial_point);
-        self.state.write(initial_state);
-        
-        // do iter
-        loop {
-            let state = unsafe { self.state.assume_init_mut() };
-
-            (self.iter_fn)(state, problem);
-
-            // check termination cond
-            if (self.term_cond)(state, problem) {
-                break;
-            }
-        }
-        
-        let final_state = unsafe{ self.state.assume_init_read() };
-        
-        final_state.to_sol()
-    }
-
-
-    pub fn solve_with_max_iteration(
-        &mut self,
-        initial_point: State::Value,
-        problem: &Problem,
-        max_iteration: u64
-    ) -> Result<State::Solution, error::ReachMaxIteration<State>> {
-        let mut reach_max = true;
-
-        // init state
-        let initial_state = State::init_from_value(initial_point);
-        self.state.write(initial_state);        
-        
-        for _iteration in 0..max_iteration {
-            let state = unsafe { self.state.assume_init_mut() };
-
-            (self.iter_fn)(state, problem);
-
-            // check termination cond
-            if (self.term_cond)(state, problem) {
-                reach_max = false;
-                break;
-            }
-        }
-
-        let ret_res = if !reach_max {
-            let final_state = unsafe{ self.state.assume_init_ref() };
-            let sol = final_state.to_sol();
-            unsafe { self.state.assume_init_drop(); }
-            Ok(sol)
-        } else {
-            let final_state = unsafe { self.state.assume_init_read() };
-            Err(ReachMaxIteration{
-                max_iteration: max_iteration, 
-                final_state: final_state
-            })
-        };
-
-        ret_res
-    }
-
-    pub fn solve_with_timeout(
-        &mut self,
-        initial_point: State::Value,
-        problem: &Problem,
-        timeout: Duration        
-    ) -> Result<State::Solution, TimeOut<State>> {
-        let start_time = Instant::now();
-        let mut is_timeout = true;
-
-        // init state
-        let initial_state = State::init_from_value(initial_point);
-        self.state.write(initial_state);
-        
-        // do iter
-        loop {
-            let state = unsafe { self.state.assume_init_mut() };
-
-            (self.iter_fn)(state, problem);
-
-            // check termination cond
-            if (self.term_cond)(state, problem) {
-                is_timeout = false;
-                break;
-            }
-
-            if start_time.elapsed() > timeout {
-                break;
-            }
-        }
-
-        if !is_timeout {
-            let final_state = unsafe{ self.state.assume_init_ref() };
-
-            let sol = final_state.to_sol();
-
-            unsafe { self.state.assume_init_drop(); }
-
-            Ok(sol)                
-        } else {
-            let final_state = unsafe { self.state.assume_init_read() };
-            Err(TimeOut { timeout: timeout, final_state: final_state })            
-        }
-
-    }
-
-    // fn into_iter
-
-
-    pub fn change_term_cond<NewTermCond>(self, new_cond: NewTermCond) -> InPlaceSolver<State, Problem, IterFn, NewTermCond> 
-    where 
-        NewTermCond: Fn(&State, &Problem) -> bool
-    {
-        InPlaceSolver { 
-            state: self.state, 
-            problem: self.problem, 
-            iter_fn: self.iter_fn,
-            term_cond: new_cond 
-        }
-    }
-}
 
 
 
@@ -513,7 +380,7 @@ mod test {
             fx.abs() < 1e-6
         };
 
-        let mut solver = Solver::new(iter_fn, term_cond);
+        let  solver = Solver::new(iter_fn, term_cond);
 
         let solution = solver.solve(1.5, &(f_and_df as fn(f64) -> (f64, f64)));
 
@@ -600,9 +467,9 @@ mod test {
                 problem.calc(state.0) < epsilon
             };
 
-            let mut solver = Solver::new(iter_fn, term_cond);
+            let  solver = Solver::new(iter_fn, term_cond);
 
-            let mut solver1 = solver.clone().change_term_cond(|state, equation| {
+            let  solver1 = solver.clone().change_term_cond(|state, equation| {
                 equation.calc(state.0) < 1e-9
             });
 
@@ -695,7 +562,7 @@ mod test {
                 state.get() == 2
             };
 
-            let mut solver = Solver::new(iter_fn, term_cond);
+            let  solver = Solver::new(iter_fn, term_cond);
 
             println!("solve");
 
@@ -708,7 +575,7 @@ mod test {
             }
 
             println!("solve with timeout");
-            let mut loop_solver = solver.change_term_cond(|_,_| false);
+            let  loop_solver = solver.change_term_cond(|_,_| false);
 
             let timeout = Duration::from_nanos(1000);
 

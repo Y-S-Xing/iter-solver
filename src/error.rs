@@ -18,8 +18,16 @@ impl<S: IterState> ReachMaxIteration<S> {
         self.final_state
     }
 
+    pub fn final_state_ref(&self) -> &S {
+        &self.final_state
+    }
+
     pub fn get_solution(&self) -> S::Solution {
         self.final_state.to_sol()
+    }
+
+    pub fn get_max_iteration(&self) -> u64 {
+        self.max_iteration
     }
 }
 
@@ -35,7 +43,15 @@ impl<S: IterState> TimeOut<S> {
         self.final_state
     }
 
+    pub fn final_state_ref(&self) -> &S {
+        &self.final_state
+    }
+
     pub fn get_solution(&self) -> S::Solution {
         self.final_state.to_sol()
+    }
+
+    pub fn get_time_limit(&self) -> Duration {
+        self.timeout
     }
 }

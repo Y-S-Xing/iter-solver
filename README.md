@@ -23,7 +23,7 @@ fn main() {
         fx.abs() < 1e-6
     };
  
-    let mut solver = Solver::new(iter_fn, term_cond);
+    let solver = Solver::new(iter_fn, term_cond);
  
     let solution = solver.solve(1.5, &(f_and_df as fn(f64) -> (f64, f64)));
  

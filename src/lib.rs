@@ -88,14 +88,14 @@ where
     /// Parameter `term_cond` specifies that the Solver stops iterating if and only if
     /// the condition is met: `term_cond` returns `true` in the current state.
     pub fn new(
-        iterfn: IterFn,
-        termcond: TermFn
+        iter_fn: IterFn,
+        term_cond: TermFn
     ) -> Self {
         Self { 
             state: PhantomData::<State>, 
             problem: PhantomData::<Problem>, 
-            iter_fn: iterfn, 
-            term_cond: termcond 
+            iter_fn: iter_fn, 
+            term_cond: term_cond 
         }
     }
 
@@ -248,7 +248,7 @@ where
 
 
 
-    /// Consumes the `Solver` and generates an iterator that outputs the current State at each step based on the given initial value and problem.
+    /// Consumes the `self` and generates an iterator that outputs the current State at each step based on the given initial value and problem.
     /// 
     /// Use this method when you want to manipulate the state at each step in detail.
     /// 
@@ -280,7 +280,7 @@ where
         }
     }
 
-    /// Consumes `self` and returns a new `Solver` with the given new termination condition.
+    /// Consumes `self` and returns a new [`Solver`] with the given new termination condition.
     pub fn change_term_cond<NewTermCond>(self, new_cond: NewTermCond) -> Solver<State, Problem, IterFn, NewTermCond> 
     where 
         NewTermCond: Fn(&State, &Problem) -> bool

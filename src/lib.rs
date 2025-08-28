@@ -254,6 +254,8 @@ where
     /// 
     /// # Example
     /// ```no_run
+    /// use iter_solver::Solver;
+    /// 
     /// let solver: Solver<f64, _, _, _> = Solver::new(iter_fn, term_cond);
     /// let mut iteration = 1usize;
     /// 
@@ -271,10 +273,10 @@ where
 
         SolverIterater { 
             problem: problem,
-            state: initial_state,
+            state: Some(initial_state),
             iter_fn: self.iter_fn,
             term_cond: self.term_cond, 
-            need_term: false
+            //need_term: false
         }
     }
 
@@ -321,11 +323,11 @@ where
     IterFn: Fn(&State, &Problem) -> State,
     TermFn: Fn(&State, &Problem) -> bool
 {
-    state: State,
+    state: Option<State>,
     iter_fn: IterFn,
     term_cond: TermFn,
     problem: &'prob Problem,
-    need_term: bool
+    //need_term: bool
 }
 
 impl<'prob, State, Problem, IterFn, TermFn> Iterator for SolverIterater<'prob, State, Problem, IterFn, TermFn> 
@@ -337,19 +339,24 @@ where
     type Item = State;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.need_term {
+        let state = if (&self.state).is_none() {
             return None;
-        }
-        if (self.term_cond)(&self.state, &self.problem) {
-            self.need_term = true;
-            let _state = (self.iter_fn)(&self.state, &self.problem);
-            return Some(mem::replace(&mut self.state, _state));
-        }
+        } else {
+            &self.state.as_ref().unwrap()
+        };
 
-        let next_state = (self.iter_fn)(&self.state, &self.problem);
-        
-        let old_state = mem::replace(&mut self.state, next_state);
-        Some(old_state) 
+        //let next_state = (self.iter_fn)(state, &self.problem);
+
+        if (self.term_cond)(&state, &self.problem) {
+            let old_state = mem::replace(&mut self.state, None);
+
+            return old_state;
+        } else {
+            let next_state = (self.iter_fn)(state, &self.problem);
+            let old_state = mem::replace(&mut self.state, Some(next_state));
+
+            return old_state;
+        }
     }
 }
 
@@ -580,6 +587,27 @@ mod test {
             let timeout = Duration::from_nanos(1000);
 
             let _ = loop_solver.solve_with_timeout(0, &(), timeout);
+        }
+    }
+
+    mod guard {
+        use std::time::Duration;
+
+        use crate::Solver;
+
+        #[test]
+        fn test() {
+            
+        
+        // define a never stop solver
+        let loop_solver = Solver::new(|_state: &f64, _: &()| {*_state}, |_: &f64, _: &()| {false});
+        let try_solve = loop_solver.solve_with_timeout(0.0, &(), Duration::from_secs(1));
+        
+        assert!(try_solve.is_err());
+
+        let try_solve = loop_solver.solve_with_max_iteration(0.0, &(), 10);
+        assert!(try_solve.is_err());
+
         }
     }
 }

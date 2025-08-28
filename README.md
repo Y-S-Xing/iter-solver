@@ -29,7 +29,7 @@ fn main() {
  
     println!("solver's solution: {}", solution);
     println!("use std function ln: {}", 1.5_f64.ln());
- }
+}
 ```
 # Installation
 Add the driver to your `Cargo.toml` dependencies:
@@ -43,4 +43,4 @@ cargo add iter-solver
 ```
 
 # License
-[MIT License](https://opensource.org/license/MIT).
+[MIT License](https://github.com/Y-S-Xing/iter-solver/blob/main/LICENSE).

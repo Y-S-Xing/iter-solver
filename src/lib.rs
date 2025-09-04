@@ -276,7 +276,7 @@ where
             state: Some(initial_state),
             iter_fn: self.iter_fn,
             term_cond: self.term_cond, 
-            need_term: false
+            //need_term: false
         }
     }
 
@@ -327,7 +327,7 @@ where
     iter_fn: IterFn,
     term_cond: TermFn,
     problem: &'prob Problem,
-    need_term: bool
+    //need_term: bool
 }
 
 impl<'prob, State, Problem, IterFn, TermFn> Iterator for SolverIterater<'prob, State, Problem, IterFn, TermFn> 
@@ -346,17 +346,10 @@ where
         };
 
         //let next_state = (self.iter_fn)(state, &self.problem);
-        if self.need_term {
-            let old_state = mem::replace(&mut self.state, None);
-
-            return old_state;
-        }
 
         if (self.term_cond)(&state, &self.problem) {
-            let next_state = (self.iter_fn)(state, &self.problem);
-            let old_state = mem::replace(&mut self.state, Some(next_state));
+            let old_state = mem::replace(&mut self.state, None);
 
-            self.need_term = true;
             return old_state;
         } else {
             let next_state = (self.iter_fn)(state, &self.problem);
@@ -366,6 +359,7 @@ where
         }
     }
 }
+
 
 
 

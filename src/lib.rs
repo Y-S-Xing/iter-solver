@@ -267,11 +267,11 @@ where
     pub fn into_iter<'prob>(self, 
         initial_point: State::Value, 
         problem: &'prob Problem
-    ) -> SolverIterater<'prob, State, Problem, IterFn, TermFn> {
+    ) -> SolverIterator<'prob, State, Problem, IterFn, TermFn> {
         // init Slover
         let initial_state = State::init_from_value(initial_point);
 
-        SolverIterater { 
+        SolverIterator { 
             problem: problem,
             state: Some(initial_state),
             iter_fn: self.iter_fn,
@@ -317,7 +317,7 @@ where
 ///
 /// [`into_iter`]: crate::Solver::into_iter
 #[derive(Debug)]
-pub struct SolverIterater<'prob, State, Problem, IterFn, TermFn> 
+pub struct SolverIterator<'prob, State, Problem, IterFn, TermFn> 
 where 
     State: IterState,
     IterFn: Fn(&State, &Problem) -> State,
@@ -330,7 +330,7 @@ where
     //need_term: bool
 }
 
-impl<'prob, State, Problem, IterFn, TermFn> Iterator for SolverIterater<'prob, State, Problem, IterFn, TermFn> 
+impl<'prob, State, Problem, IterFn, TermFn> Iterator for SolverIterator<'prob, State, Problem, IterFn, TermFn> 
 where 
     State: IterState,
     IterFn: Fn(&State, &Problem) -> State,

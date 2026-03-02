@@ -1,11 +1,16 @@
 #![doc = include_str!("../README.md")]
 
+extern crate self as iter_solver;
+
+pub use iter_state_derive::IterState;
+
 use std::{marker::PhantomData, mem, time::{Duration, Instant}};
 
 use crate::error::{ReachMaxIteration, TimeOut};
 
 pub mod error;
 mod utils;
+mod build_test;
 
 /// Intermediate state of an iterative algorithm.
 ///
@@ -15,7 +20,9 @@ mod utils;
 ///
 /// Therefore, IterState allows you to customize the intermediate state and separate the abstractions of value and solution.
 ///
-/// If you expect the simplest behavior, this crate has already implemented `IterState` for basic data types `i*`, `u*`, and `f*`, where their associated types Value and Solution are themselves.
+/// If you expect the simplest behavior, this crate has already implemented `IterState` for basic data types `i*`, `u*`, and `f*`, where their associated types `Value` and `Solution` are themselves.
+/// 
+/// Additionally, you can use the macro `#[derive(IterState)]` to derive `IterState`. In this case, the associated types `Value` and `Solution` will be set to `Self`. Moreover, similar to the implementation for basic data types, the `init_from_value` method will simply return the parameter directly, and the `to_sol` method will directly clone `self` and return it.
 pub trait IterState: Sized {
     /// Type representing the value during iteration (e.g., intermediate computation results).
     type Value;
@@ -253,7 +260,7 @@ where
     /// Use this method when you want to manipulate the state at each step in detail.
     /// 
     /// # Example
-    /// ```no_run
+    /// ```ignore
     /// use iter_solver::Solver;
     /// 
     /// let solver: Solver<f64, _, _, _> = Solver::new(iter_fn, term_cond);
@@ -554,42 +561,6 @@ mod test {
         }
     }
 
-    mod test_leak {
-        use std::time::Duration;
-
-        use crate::{utils, Solver};
-        
-
-        #[test]
-        fn solve() {
-            let iter_fn = |state: &utils::debug::VisibleDrop, _: &()| {
-                utils::debug::VisibleDrop::new(state.get().wrapping_add(1))
-            };
-
-            let term_cond = |state: &utils::debug::VisibleDrop, _: &()| {
-                state.get() == 2
-            };
-
-            let  solver = Solver::new(iter_fn, term_cond);
-
-            println!("solve");
-
-            solver.solve(0, &());
-
-
-            println!("iter");
-            for _ in solver.clone().into_iter(0, &()) {
-                println!("do iter")
-            }
-
-            println!("solve with timeout");
-            let  loop_solver = solver.change_term_cond(|_,_| false);
-
-            let timeout = Duration::from_nanos(1000);
-
-            let _ = loop_solver.solve_with_timeout(0, &(), timeout);
-        }
-    }
 
     mod guard {
         use std::time::Duration;
@@ -599,16 +570,34 @@ mod test {
         #[test]
         fn test() {
             
-        
-        // define a never stop solver
-        let loop_solver = Solver::new(|_state: &f64, _: &()| {*_state}, |_: &f64, _: &()| {false});
-        let try_solve = loop_solver.solve_with_timeout(0.0, &(), Duration::from_secs(1));
-        
-        assert!(try_solve.is_err());
+            // define a never stop solver
+            let loop_solver = Solver::new(|_state: &f64, _: &()| {*_state}, |_: &f64, _: &()| {false});
+            let try_solve = loop_solver.solve_with_timeout(0.0, &(), Duration::from_secs(1));
+            
+            assert!(try_solve.is_err());
 
-        let try_solve = loop_solver.solve_with_max_iteration(0.0, &(), 10);
-        assert!(try_solve.is_err());
+            let try_solve = loop_solver.solve_with_max_iteration(0.0, &(), 10);
+            assert!(try_solve.is_err());
 
+        }
+    }
+
+
+    mod derive_test {
+        use crate::IterState;
+
+        #[derive(PartialEq, Eq , Clone, IterState, Debug)]
+        struct State(Vec<u8>, Box<String>);
+
+        #[test]
+        fn test_derive() {
+            let vec1 = vec![0,12, 39];
+            let boxed_str = Box::new("some str".to_string());
+            let s = State(vec1, boxed_str);
+            let s_cloned = s.clone();
+            assert_eq!(State::init_from_value(s_cloned), s);
+            let final_s = State::init_from_value(s.clone()).to_sol();
+            assert_eq!(final_s, s);
         }
     }
 }

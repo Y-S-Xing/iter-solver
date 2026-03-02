@@ -3,6 +3,7 @@ name = "iter_state_derive"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+repository = "https://github.com/Y-S-Xing/iter-solver"
 
 [lib]
 proc-macro = true

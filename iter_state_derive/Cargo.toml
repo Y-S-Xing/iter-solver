@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/Y-S-Xing/iter-solver"
+description = "A derive macro for iter-solver crate."
 
 [lib]
 proc-macro = true

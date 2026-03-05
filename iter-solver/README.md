@@ -2,7 +2,7 @@
 iter-solver is a flexible and general iterative algorithm framework that allows users to customize iteration logic and termination conditions, providing a unified abstraction for different problems and algorithms.
 # Example
 The following program defines a simple Newton iterative solver to compute ln(1.5):
-```no_run
+```
 use iter_solver::Solver;
 
 fn f_and_df(x: f64) -> (f64, f64) {

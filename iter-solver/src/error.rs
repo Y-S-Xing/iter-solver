@@ -1,6 +1,6 @@
 //! Error types.
 
-use std::time::Duration;
+use core::time::Duration;
 
 use thiserror::Error;
 
@@ -13,16 +13,16 @@ use crate::IterState;
 /// reached and the final state the solver had achieved when the limit was exceeded.
 #[derive(Clone, Debug, Error)]
 #[error("Solver reached the maximum iteration: {max_iteration}.")]
-pub struct ReachMaxIteration<State: IterState> {
+pub struct MaxIterationReached<State: IterState> {
     /// The maximum iteration count that was reached.
     pub max_iteration: u64,
     /// The final state of the solver at the time the iteration limit was reached.
     pub(crate) final_state: State,
 }
 
-impl<State: IterState> ReachMaxIteration<State> {
+impl<State: IterState> MaxIterationReached<State> {
     /// Consumes self and returns the final state reached by the solver.
-    pub fn take_final_state(self) -> State {
+    pub fn into_final_state(self) -> State {
         self.final_state
     }
 
@@ -32,8 +32,8 @@ impl<State: IterState> ReachMaxIteration<State> {
     }
 
     /// Directly obtains [`IterState::Solution`] from the final state reached by the solver.
-    pub fn get_solution(&self) -> State::Solution {
-        self.final_state.to_sol()
+    pub fn into_solution(self) -> State::Solution {
+        self.final_state.into_sol()
     }
 }
 
@@ -53,7 +53,7 @@ pub struct TimeOut<State: IterState> {
 
 impl<State: IterState> TimeOut<State> {
     /// Consumes self and returns the final state reached by the solver.
-    pub fn take_final_state(self) -> State {
+    pub fn into_final_state(self) -> State {
         self.final_state
     }
 
@@ -63,7 +63,7 @@ impl<State: IterState> TimeOut<State> {
     }
 
     /// Directly obtains [`IterState::Solution`] from the final state reached by the solver.
-    pub fn get_solution(&self) -> State::Solution {
-        self.final_state.to_sol()
+    pub fn into_solution(self) -> State::Solution {
+        self.final_state.into_sol()
     }
 }

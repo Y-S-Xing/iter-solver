@@ -1,15 +1,27 @@
 #![doc = include_str!("../README.md")]
+#![cfg_attr(not(feature = "std"), no_std)]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 extern crate self as iter_solver;
 
 pub use iter_state_derive::IterState;
 
-use std::{marker::PhantomData, mem, time::{Duration, Instant}};
+use core::marker::PhantomData;
 
-use crate::error::{ReachMaxIteration, TimeOut};
+#[cfg(feature = "std")]
+use std::time::Duration;
+
+#[cfg(feature = "std")]
+use std::time::Instant;
+
+#[cfg(feature = "std")]
+use crate::error::TimeOut;
+
+use crate::error::MaxIterationReached;
 
 pub mod error;
-mod utils;
+
+#[cfg(test)]
 mod build_test;
 
 /// Intermediate state of an iterative algorithm.
@@ -22,7 +34,7 @@ mod build_test;
 ///
 /// If you expect the simplest behavior, this crate has already implemented `IterState` for basic data types `i*`, `u*`, and `f*`, where their associated types `Value` and `Solution` are themselves.
 /// 
-/// Additionally, you can use the macro `#[derive(IterState)]` to derive `IterState`. In this case, the associated types `Value` and `Solution` will be set to `Self`. Moreover, similar to the implementation for basic data types, the `init_from_value` method will simply return the parameter directly, and the `to_sol` method will directly clone `self` and return it.
+/// Additionally, you can use the macro `#[derive(IterState)]` to derive `IterState`. In this case, the associated types [`IterState::Value`] and [`IterState::Solution`] will be set to `Self`. Moreover, similar to the implementation for basic data types, the [`IterState::init_from_value`] method will simply return the parameter directly, and the [`IterState::into_sol`] method will directly return `self`.
 pub trait IterState: Sized {
     /// Type representing the value during iteration (e.g., intermediate computation results).
     type Value;
@@ -34,7 +46,7 @@ pub trait IterState: Sized {
     fn init_from_value(initial_point: Self::Value) -> Self;  
 
     /// Converts the current state into the solution.  
-    fn to_sol(&self) -> Self::Solution;  
+    fn into_sol(self) -> Self::Solution;  
 }
 
 macro_rules! iterstate_impl {
@@ -46,8 +58,8 @@ macro_rules! iterstate_impl {
                 fn init_from_value(initial_point: Self::Value) -> Self {
                     initial_point
                 }
-                fn to_sol(&self) -> Self::Solution {
-                    *self
+                fn into_sol(self) -> Self::Solution {
+                    self
                 }
             }
         )*
@@ -69,9 +81,9 @@ iterstate_impl!(
 #[derive(Debug)]
 pub struct Solver<State, Problem, IterFn, TermFn>
 where
-State: IterState,
-IterFn: Fn(&State, &Problem) -> State,
-TermFn: Fn(&State, &Problem) -> bool,
+    State: IterState,
+    IterFn: Fn(State, &Problem) -> State,
+    TermFn: Fn(&State, &Problem) -> bool,
 {
     /// Intermediate state of the solver (uninitialized at the start)
     state: PhantomData<State>,
@@ -85,7 +97,7 @@ TermFn: Fn(&State, &Problem) -> bool,
 impl<State, Problem, IterFn, TermFn> Solver<State, Problem, IterFn, TermFn>
 where 
     State: IterState,
-    IterFn: Fn(&State, &Problem) -> State,
+    IterFn: Fn(State, &Problem) -> State,
     TermFn: Fn(&State, &Problem) -> bool
 {
     /// Creates a Solver instance with the specified methods.
@@ -111,17 +123,21 @@ where
     /// # Note
     /// If the algorithm defined by the solver contains logical errors, 
     /// the solve function may enter an infinite loop. 
-    /// To avoid this, try [`Solver::solve_with_max_iteration`] or [`Solver::solve_with_timeout`].
+    /// To avoid this, try [`Solver::solve_with_max_iterations`] or [`Solver::solve_with_timeout`]. If you need more flexible error handling, try [`Solver::solve_with_error`].
     pub fn solve(&self, initial_point: State::Value, problem: &Problem) -> State::Solution {
         // init state
         let initial_state = State::init_from_value(initial_point);
         let mut state = initial_state;
+
+        if (self.term_cond)(&state, problem) {
+            return state.into_sol();
+        }
         
         // do iter
         loop {
             //let state = unsafe { self.state.assume_init_mut() };
 
-            state = (self.iter_fn)(&state, problem);
+            state = (self.iter_fn)(state, problem);
 
             // check termination cond
             if (self.term_cond)(&state, problem) {
@@ -131,7 +147,7 @@ where
         
         let final_state = state;
 
-        let sol = final_state.to_sol();
+        let sol = final_state.into_sol();
 
         //unsafe { self.state.assume_init_drop(); }
 
@@ -141,34 +157,40 @@ where
 
     /// A solution method with a maximum iteration limit.
     /// If the termination condition is met before reaching the maximum number of iterations, it returns an [`Ok`] value with the type [`IterState::Solution`].
-    /// Otherwise, it returns an [`Err`] with [`error::ReachMaxIteration`].
+    /// Otherwise, it returns an [`Err`] with [`error::MaxIterationReached`].
     /// 
     /// # Example
     /// ```
     /// use iter_solver::Solver;
     /// 
     /// // define a never stop solver
-    /// let loop_solver = Solver::new(|_state: &f64, _: &()| {*_state}, |_: &f64, _: &()| {false});
-    /// let try_solve = loop_solver.solve_with_max_iteration(0.0, &(), 10);
+    /// let loop_solver = Solver::new(|_state: f64, _: &()| {_state}, |_: &f64, _: &()| {false});
+    /// let try_solve = loop_solver.solve_with_max_iterations(0.0, &(), 10);
     /// 
     /// assert!(try_solve.is_err());
     /// ```
-    pub fn solve_with_max_iteration(
+    /// 
+    /// If you need more flexible error handling, try [`Solver::solve_with_error`].
+    pub fn solve_with_max_iterations(
         &self,
         initial_point: State::Value,
         problem: &Problem,
         max_iteration: u64
-    ) -> Result<State::Solution, error::ReachMaxIteration<State>> {
+    ) -> Result<State::Solution, MaxIterationReached<State>> {
         let mut reach_max = true;
 
         // init state
         let initial_state = State::init_from_value(initial_point);
-        let mut state = initial_state;        
+        let mut state = initial_state;     
+
+        if (self.term_cond)(&state, problem) {
+            return Ok(state.into_sol());
+        }   
         
         for _iteration in 0..max_iteration {
             //state = unsafe { self.state.assume_init_mut() };
 
-            state = (self.iter_fn)(&state, problem);
+            state = (self.iter_fn)(state, problem);
 
             // check termination cond
             if (self.term_cond)(&state, problem) {
@@ -179,12 +201,12 @@ where
 
         let ret_res = if !reach_max {
             let final_state = state;
-            let sol = final_state.to_sol();
+            let sol = final_state.into_sol();
             //unsafe { self.state.assume_init_drop(); }
             Ok(sol)
         } else {
             let final_state = state;
-            Err(ReachMaxIteration{
+            Err(MaxIterationReached{
                 max_iteration: max_iteration, 
                 final_state: final_state
             })
@@ -193,6 +215,7 @@ where
         ret_res
     }
 
+    #[cfg(feature = "std")]
     /// A solution method with a time limit.
     /// If the termination condition is met before reaching the timeout duration elapses, it returns an [`Ok`] value with the type [`IterState::Solution`].
     /// Otherwise, it returns an [`Err`] with [`error::TimeOut`].
@@ -203,11 +226,13 @@ where
     /// use std::time::Duration;
     /// 
     /// // define a never stop solver
-    /// let loop_solver = Solver::new(|_state: &f64, _: &()| {*_state}, |_: &f64, _: &()| {false});
+    /// let loop_solver = Solver::new(|_state: f64, _: &()| {_state}, |_: &f64, _: &()| {false});
     /// let try_solve = loop_solver.solve_with_timeout(0.0, &(), Duration::from_secs(1));
     /// 
     /// assert!(try_solve.is_err());
     /// ```
+    /// 
+    /// If you need more flexible error handling, try [`Solver::solve_with_error`].
     pub fn solve_with_timeout(
         &self,
         initial_point: State::Value,
@@ -220,12 +245,16 @@ where
         // init state
         let initial_state = State::init_from_value(initial_point);
         let mut state = initial_state;
+
+        if (self.term_cond)(&state, problem) {
+            return Ok(state.into_sol());
+        }
         
         // do iter
         loop {
             //state = unsafe { self.state.assume_init_mut() };
 
-            state = (self.iter_fn)(&state, problem);
+            state = (self.iter_fn)(state, problem);
 
             if start_time.elapsed() > timeout {
                 break;
@@ -241,7 +270,7 @@ where
         if !is_timeout {
             let final_state = state;
 
-            let sol = final_state.to_sol();
+            let sol = final_state.into_sol();
 
             //unsafe { self.state.assume_init_drop(); }
 
@@ -253,42 +282,88 @@ where
 
     }
 
-
-
-    /// Consumes the `self` and generates an iterator that outputs the current State at each step based on the given initial value and problem.
-    /// 
-    /// Use this method when you want to manipulate the state at each step in detail.
+    /// Performs iterative solving with custom error handling, allowing early termination.
+    ///
+    /// This method executes an iterative solving process, but before each iteration,
+    /// it invokes the provided `check_fn` with the current state and the problem reference.
+    /// If `check_fn` returns `Ok(())`, the iteration continues until the stopping criteria
+    /// are met, returning [`Ok`] with the final solution. If `check_fn` returns `Err(e)`, the
+    /// iteration stops immediately and returns `Err(e)`.
+    ///
+    /// The key feature is **flexible error type customization** – `E` can be any type
+    /// that suits your error-handling needs (e.g., a simple `&'static str`, a custom enum,
+    /// or a structured error type). This allows you to:
+    /// - Embed domain-specific failure semantics directly into the solving flow.
+    /// - Propagate rich error information without boxing or trait objects.
+    /// - Maintain full control over error kinds and context.
     /// 
     /// # Example
-    /// ```ignore
-    /// use iter_solver::Solver;
-    /// 
-    /// let solver: Solver<f64, _, _, _> = Solver::new(iter_fn, term_cond);
-    /// let mut iteration = 1usize;
-    /// 
-    /// for state_float in solver.into_iter(2.0, &problem) {
-    ///     println!("the solution after {} iteration(s): {}", iteration, state_float);
-    ///     iteration += 1;
-    /// } 
     /// ```
-    pub fn into_iter<'prob>(self, 
-        initial_point: State::Value, 
-        problem: &'prob Problem
-    ) -> SolverIterator<'prob, State, Problem, IterFn, TermFn> {
-        // init Slover
+    /// use iter_solver::Solver;
+    ///         
+    /// let check_fn = |float: &f64, _: &()| {
+    ///     if float.is_infinite() {
+    ///         return Err("Inf Error");
+    ///     } else if float.is_nan() {
+    ///        return Err("NaN Error");
+    ///     }
+    ///     Ok(())
+    /// };
+    ///
+    /// let solver = Solver::new(
+    ///    |f, _| f * 2.0, // 2^n -> Inf
+    ///    |_,_| {false} // never stop
+    /// );
+    ///
+    /// let result = solver.solve_with_error(1.0, &(), check_fn);
+    ///
+    /// assert!(result.is_err());
+    /// println!("{}", result.unwrap_err()) // print "Inf Error"
+    /// ```
+    pub fn solve_with_error<E, F>(
+        &self,
+        initial_point: State::Value,
+        problem: &Problem,
+        check_fn: F
+    ) -> Result<State::Solution, E>
+    where 
+        F: Fn(&State, &Problem) -> Result<(), E>
+    {
+        // init state
         let initial_state = State::init_from_value(initial_point);
+        let mut state = initial_state;
 
-        SolverIterator { 
-            problem: problem,
-            state: Some(initial_state),
-            iter_fn: self.iter_fn,
-            term_cond: self.term_cond, 
-            //need_term: false
+        check_fn(&state, problem)?;
+        if (self.term_cond)(&state, problem) {
+            return Ok(state.into_sol());
         }
+        
+        // do iter
+        loop {
+            //let state = unsafe { self.state.assume_init_mut() };
+
+            state = (self.iter_fn)(state, problem);
+
+            check_fn(&state, problem)?;
+            // check termination cond
+            if (self.term_cond)(&state, problem) {
+                break;
+            }
+        }
+        
+        let final_state = state;
+
+        let sol = final_state.into_sol();
+
+        //unsafe { self.state.assume_init_drop(); }
+
+        Ok(sol)
     }
 
+
+
     /// Consumes `self` and returns a new [`Solver`] with the given new termination condition.
-    pub fn change_term_cond<NewTermCond>(self, new_cond: NewTermCond) -> Solver<State, Problem, IterFn, NewTermCond> 
+    pub fn with_term_cond<NewTermCond>(self, new_cond: NewTermCond) -> Solver<State, Problem, IterFn, NewTermCond> 
     where 
         NewTermCond: Fn(&State, &Problem) -> bool
     {
@@ -304,66 +379,11 @@ where
 impl<State, Problem, IterFn, TermFn> Clone for Solver<State, Problem, IterFn, TermFn>
 where 
    State: IterState,
-   IterFn: Fn(&State, &Problem) -> State + Clone,
+   IterFn: Fn(State, &Problem) -> State + Clone,
    TermFn: Fn(&State, &Problem) -> bool + Clone
 {
     fn clone(&self) -> Self {
         Self { state: PhantomData::<State>, problem: PhantomData::<Problem>, iter_fn: self.iter_fn.clone(), term_cond: self.term_cond.clone() }
-    }
-}
-
-/// Solver iterator, used to step through the solving process and output the state of each iteration.
-///
-/// This struct is created by consuming (taking ownership) a configured `Solver`,
-/// and implements the `Iterator` trait, allowing users to obtain intermediate solving states
-/// step by step through loops. Each call to the `next` method applies one iteration function
-/// and checks whether the termination condition is met.
-/// 
-/// # Examples
-/// See the example for the [`Solver::into_iter`] method.
-///
-/// [`into_iter`]: crate::Solver::into_iter
-#[derive(Debug)]
-pub struct SolverIterator<'prob, State, Problem, IterFn, TermFn> 
-where 
-    State: IterState,
-    IterFn: Fn(&State, &Problem) -> State,
-    TermFn: Fn(&State, &Problem) -> bool
-{
-    state: Option<State>,
-    iter_fn: IterFn,
-    term_cond: TermFn,
-    problem: &'prob Problem,
-    //need_term: bool
-}
-
-impl<'prob, State, Problem, IterFn, TermFn> Iterator for SolverIterator<'prob, State, Problem, IterFn, TermFn> 
-where 
-    State: IterState,
-    IterFn: Fn(&State, &Problem) -> State,
-    TermFn: Fn(&State, &Problem) -> bool
-{
-    type Item = State;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let state = if (&self.state).is_none() {
-            return None;
-        } else {
-            &self.state.as_ref().unwrap()
-        };
-
-        //let next_state = (self.iter_fn)(state, &self.problem);
-
-        if (self.term_cond)(&state, &self.problem) {
-            let old_state = mem::replace(&mut self.state, None);
-
-            return old_state;
-        } else {
-            let next_state = (self.iter_fn)(state, &self.problem);
-            let old_state = mem::replace(&mut self.state, Some(next_state));
-
-            return old_state;
-        }
     }
 }
 
@@ -374,6 +394,8 @@ where
 
 #[cfg(test)]
 mod test {
+    use crate::Solver;
+
     mod newton {
         use crate::{IterState, Solver};
 
@@ -384,8 +406,8 @@ mod test {
         }
         #[test]
     fn show() {
-        let iter_fn = |state: &f64, problem: &fn(f64) -> (f64, f64)| {
-            let x_n = *state;
+        let iter_fn = |state: f64, problem: &fn(f64) -> (f64, f64)| {
+            let x_n = state;
             let (fx, dfx) = problem(x_n);
             x_n - (fx / dfx)
         };
@@ -395,12 +417,15 @@ mod test {
             fx.abs() < 1e-6
         };
 
-        let  solver = Solver::new(iter_fn, term_cond);
+        let solver = Solver::new(iter_fn, term_cond);
 
         let solution = solver.solve(1.5, &(f_and_df as fn(f64) -> (f64, f64)));
 
-        println!("solver's solution: {}", solution);
+        println!("solver's solution: {}", solution);  
         println!("use std function ln: {}", 1.5_f64.ln());
+
+        // solver's solution: 0.4054651081202111
+        // use std function ln: 0.4054651081081644
     }
 
         #[derive(Clone)]
@@ -460,14 +485,14 @@ mod test {
                 Self(initial_point)
             }
         
-            fn to_sol(&self) -> Self::Solution {
+            fn into_sol(self) -> Self::Solution {
                 self.0
             }
         }
 
         #[test]
         fn test() {
-            let iter_fn = |state: &NewtonState, problem: &Equation| {
+            let iter_fn = |state: NewtonState, problem: &Equation| {
                 let x = state.0;
                 let dx = problem.diff(x);
                 let fx = problem.calc(x);
@@ -484,7 +509,7 @@ mod test {
 
             let  solver = Solver::new(iter_fn, term_cond);
 
-            let  solver1 = solver.clone().change_term_cond(|state, equation| {
+            let  solver1 = solver.clone().with_term_cond(|state, equation| {
                 equation.calc(state.0) < 1e-9
             });
 
@@ -508,59 +533,33 @@ mod test {
             assert!(prob2.0.calc(prob2_sol) < 1e-6)
         }
 
-        #[test]
-        fn solver_iter() {
-                let iter_fn = |state: &NewtonState, problem: &Equation| {
-                let x = state.0;
-                let dx = problem.diff(x);
-                let fx = problem.calc(x);
-
-                let next_x = x - (fx / dx);
-
-                NewtonState(next_x)
-            };
-
-            let term_cond = |state: &NewtonState, problem: &Equation| {
-                let epsilon = 1e-6;
-                problem.calc(state.0).abs() < epsilon
-            };
-
-            let solver = Solver::new(iter_fn, term_cond);
-
-            let prob1 = (Equation::Exp { a: 2., k: 3. }, 2.);
-
-            let prob2 = (Equation::Square { a: 2., b: -5., c: 3. }, 6.);
-
-            {
-                let iter = solver.clone().into_iter(prob1.1, &prob1.0);
-                let mut counter = 0usize;
-                
-                for state in iter {
-                    counter += 1;
-                    if counter == 5 {
-                        println!("after 5 times iter, the f(x) = {}", (prob1.0).calc(state.0));
-                        break;
-                    }
-                }
-            }
-
-            //solver.init();
-
-            {
-                let iter = solver.into_iter(prob2.1, &prob2.0);
-                let mut counter = 0usize;
-                
-                for state in iter {
-                    counter += 1;
-                    if counter == 5 {
-                        println!("after 5 times iter, the f(x) = {}", (prob2.0).calc(state.0));
-                        break;
-                    }
-                }
-            }
-        }
+        
+            
     }
 
+    
+    #[test]
+    fn test_with_error() {
+        let check_fn = |float: &f64, _: &()| {
+            if float.is_infinite() {
+                return Err("Inf Error");
+            } else if float.is_nan() {
+                return Err("NaN Error");
+            }
+            Ok(())
+        };
+
+        let solver = Solver::new(
+            |f, _| f * 2.0, // 2^n -> Inf
+            |_,_| {false} // never stop
+        );
+
+        let result = solver.solve_with_error(1.0, &(), check_fn);
+
+        assert!(result.is_err());
+        println!("{}", result.unwrap_err()) // Inf Error
+    }
+    
 
     mod guard {
         use std::time::Duration;
@@ -571,12 +570,12 @@ mod test {
         fn test() {
             
             // define a never stop solver
-            let loop_solver = Solver::new(|_state: &f64, _: &()| {*_state}, |_: &f64, _: &()| {false});
+            let loop_solver = Solver::new(|_state: f64, _: &()| {_state}, |_: &f64, _: &()| {false});
             let try_solve = loop_solver.solve_with_timeout(0.0, &(), Duration::from_secs(1));
             
             assert!(try_solve.is_err());
 
-            let try_solve = loop_solver.solve_with_max_iteration(0.0, &(), 10);
+            let try_solve = loop_solver.solve_with_max_iterations(0.0, &(), 10);
             assert!(try_solve.is_err());
 
         }
@@ -586,18 +585,18 @@ mod test {
     mod derive_test {
         use crate::IterState;
 
-        #[derive(PartialEq, Eq , Clone, IterState, Debug)]
+        #[derive(PartialEq, Eq , IterState, Debug)]
         struct State(Vec<u8>, Box<String>);
 
         #[test]
         fn test_derive() {
             let vec1 = vec![0,12, 39];
             let boxed_str = Box::new("some str".to_string());
-            let s = State(vec1, boxed_str);
-            let s_cloned = s.clone();
-            assert_eq!(State::init_from_value(s_cloned), s);
-            let final_s = State::init_from_value(s.clone()).to_sol();
-            assert_eq!(final_s, s);
+            let value = State(vec1.clone(), boxed_str.clone());
+            let state = State::init_from_value(value);
+            assert_eq!(vec1, state.0);
+            let final_s = state.into_sol();
+            assert_eq!(final_s.1, boxed_str);
         }
     }
 }

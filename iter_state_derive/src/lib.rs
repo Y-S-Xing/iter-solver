@@ -5,9 +5,9 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, DeriveInput};
 
-/// A derive macro that automatically derives the `IterState` trait for structs that satisfy the `Clone` trait. 
+/// A derive macro that automatically derives the `IterState` trait.
 /// 
-/// When using this macro to implement the trait, the associated types `Value` and `Solution` will both be set to `Self`, the `init_from_value` method will simply return the parameter directly, and the `to_sol` method will directly clone `self` and return it.
+/// When using this macro to implement the trait, the associated types `Value` and `Solution` will both be set to `Self`, the `init_from_value` method will simply return the parameter directly, and the `into_sol` method will directly return `self`.
 #[proc_macro_derive(IterState)]
 pub fn iter_state_trait_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
@@ -17,8 +17,6 @@ pub fn iter_state_trait_derive(input: TokenStream) -> TokenStream {
 
     let expanded = quote! {
         impl #impl_generics ::iter_solver::IterState for #name #ty_generics #where_clause
-        where
-            Self: Clone,
         {
             type Value = Self;
             type Solution = Self;
@@ -27,8 +25,8 @@ pub fn iter_state_trait_derive(input: TokenStream) -> TokenStream {
                 initial_point
             }
 
-            fn to_sol(&self) -> Self::Solution {
-                <Self as Clone>::clone(self)
+            fn into_sol(self) -> Self::Solution {
+                self
             }
         }
     };

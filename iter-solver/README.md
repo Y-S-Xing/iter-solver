@@ -12,30 +12,33 @@ fn f_and_df(x: f64) -> (f64, f64) {
 }
 
 fn main() {
-    let iter_fn = |state: &f64, problem: &fn(f64) -> (f64, f64)| {
-        let x_n = *state;
+    let iter_fn = |state: f64, problem: &fn(f64) -> (f64, f64)| {
+        let x_n = state;
         let (fx, dfx) = problem(x_n);
         x_n - (fx / dfx)
     };
- 
+
     let term_cond = |state: &f64, problem: &fn(f64) -> (f64, f64)| {
         let (fx, _) = problem(*state);
         fx.abs() < 1e-6
     };
- 
+
     let solver = Solver::new(iter_fn, term_cond);
- 
+
     let solution = solver.solve(1.5, &(f_and_df as fn(f64) -> (f64, f64)));
- 
+
     println!("solver's solution: {}", solution);
     println!("use std function ln: {}", 1.5_f64.ln());
+
+    // solver's solution: 0.4054651081202111
+    // use std function ln: 0.4054651081081644
 }
 ```
 # Installation
 Add the following to your `Cargo.toml` dependencies:
 ```toml
 [dependencies]
-iter-solver = "0.3"
+iter-solver = "0.4"
 ```
 or add it directly from the terminal:
 ```bash

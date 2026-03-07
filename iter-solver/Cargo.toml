@@ -1,12 +1,16 @@
 [package]
 name = "iter-solver"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 description = "A rust crate provide flexible and general iterative algorithm framework." 
 repository = "https://github.com/Y-S-Xing/iter-solver"
 keywords = ["solver", "iteration", "algorithm", "numerical", "optimization"]
 
+[features]
+default = ["std"]
+std = []
+
 [dependencies]
-thiserror = "2"
-iter_state_derive = { path = "../iter_state_derive", version = "0.1.0"}
+thiserror = { version = "2", default-features = false }
+iter_state_derive = { path = "../iter_state_derive", version = "0.2.0"}
